@@ -78,12 +78,14 @@ public class BundlerPackager
 
         IRubyObject gemRepositoryBuilder = createNewGemRepositoryBuilder(runtime);
 
+        String workTempDirectoryPath = createTemporaryDirectory();
         String gemrepoTempDirectoryPath = createTemporaryDirectory();
 
         IRubyObject response;
         try {
             response = adapter.callMethod(gemRepositoryBuilder, "build_repository_using_bundler",
                     new IRubyObject[]{
+                            javaToRuby(runtime, workTempDirectoryPath),
                             javaToRuby(runtime, gemrepoTempDirectoryPath),
                             javaToRuby(runtime, gemfileLocation),
                             javaToRuby(runtime, gemfileLockLocation)
@@ -96,34 +98,15 @@ public class BundlerPackager
 
         String gemrepoGeneratedLocation = response.asJavaString();
 
-        try {
-            deleteRecursively(new File(gemrepoGeneratedLocation + "/bin"));
-        }
-        catch (IOException e) {
-            //If it fails, no big deal, we eliminate the whole repo later on.
-        }
-        try {
-            deleteRecursively(new File(gemrepoGeneratedLocation + "/cache"));
-        }
-        catch (IOException e) {
-            //If it fails, no big deal, we eliminate the whole repo later on.
-        }
-        try {
-            deleteRecursively(new File(gemrepoGeneratedLocation + "/doc"));
-        }
-        catch (IOException e) {
-            //If it fails, no big deal, we eliminate the whole repo later on.
-        }
+        // try to eliminate directories that we don't need in the jar
+        deleteRecursivelyIgnoringErrors(new File(gemrepoGeneratedLocation, "bin"));
+        deleteRecursivelyIgnoringErrors(new File(gemrepoGeneratedLocation, "cache"));
+        deleteRecursivelyIgnoringErrors(new File(gemrepoGeneratedLocation, "doc"));
 
         generateJarFile(new File(gemrepoGeneratedLocation), gemfileLocation);
 
-        try {
-            deleteRecursively(new File(gemrepoTempDirectoryPath));
-        } catch (IOException e) {
-            throw new MojoExecutionException("Error trying to delete temporary directory for the gems, " +
-                    "please ensure the plugin is properly built and the temporary directory [" +
-                    gemrepoTempDirectoryPath + "] is writeable." );
-        }
+        deleteRecursivelyIgnoringErrors(new File(workTempDirectoryPath));
+        deleteRecursivelyIgnoringErrors(new File(gemrepoTempDirectoryPath));
     }
 
     private IRubyObject createNewGemRepositoryBuilder(Ruby runtime) throws MojoExecutionException {
@@ -146,6 +129,16 @@ public class BundlerPackager
         }
 
         return runtime.evalScriptlet("Proofpoint::GemToJarPackager::GemRepositoryBuilder.new");
+    }
+
+    private void deleteRecursivelyIgnoringErrors(File file)
+    {
+        try {
+            deleteRecursively(file);
+        }
+        catch (IOException e) {
+            getLog().warn("Failed to delete directory recursively", e);
+        }
     }
 
     private String createTemporaryDirectory() throws MojoExecutionException {
@@ -184,9 +177,9 @@ public class BundlerPackager
             throws MojoExecutionException
     {
         try {
-            if (!outputDirectory.exists()) {
-                outputDirectory.mkdirs();
-            }
+            //noinspection ResultOfMethodCallIgnored
+            outputDirectory.mkdirs();
+
             File gemrepoJarFile = new File(String.format("%s/%s-%s-gemrepo.jar", outputDirectory.getCanonicalPath(), project.getArtifactId(), project.getVersion()));
             getLog().info("Building gem repository jar: " + gemrepoJarFile.getName());
 
